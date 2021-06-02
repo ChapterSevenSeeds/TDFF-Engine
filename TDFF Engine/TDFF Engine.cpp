@@ -24,6 +24,7 @@
 #include <climits>
 using namespace std;
 
+typedef unsigned long long ulong;
 const unordered_set<char> disallowedFilenameChars{ '<', '>', ':', '"', '/', '\\', '|', '?', '*', '\0' };
 
 enum class Mode
@@ -71,19 +72,6 @@ public:
     FileData(FileData& o) : name(o.name), hash(o.hash), size(o.size), data(o.data), fileName(o.fileName) { }
     FileData(FileData&& o) noexcept : name(o.name), hash(o.hash), size(o.size), data(o.data), fileName(o.fileName) { }
 };
-
-LPCWSTR s2ws(const string& s)
-{
-    wstring stemp = wstring(s.begin(), s.end());
-    LPCWSTR sw = stemp.c_str();
-
-    return sw;
-}
-
-string convertFileNameToString(TCHAR* name)
-{
-    return string(CT2CA(CString(name)));
-}
 
 string computeHash(const char* file, WIN32_FIND_DATAA info)
 {
@@ -202,7 +190,7 @@ inline void stringToLower(char* s)
     size_t strPos = 0;
     while (s[strPos] != '\0')
     {
-        s[strPos] = tolower(s[strPos]);
+        s[strPos] = char(tolower(s[strPos]));
         ++strPos;
     }
 }
@@ -227,28 +215,28 @@ inline bool checkExtension(unordered_set<string>& container, string file, bool n
     return setContainsLower(container, extension) ^ negate;
 }
 
-inline unsigned long long nameFirstHash(char* fileName, unsigned long long length)
+inline unsigned long long nameFirstHash(char* fileName, unsigned long long)
 {
     return strlen(fileName);
 }
 
-inline unsigned long long lengthAndHashFirstHash(char* fileName, unsigned long long length)
+inline unsigned long long lengthAndHashFirstHash(char*, unsigned long long length)
 {
     return length;
 }
 
-inline string nameSecondHash(FileData* data, unsigned long long length)
+inline string nameSecondHash(FileData* data, unsigned long long)
 {
     string name(data->fileName);
     return name;
 }
 
-inline string lengthSecondHash(FileData* data, unsigned long long length)
+inline string lengthSecondHash(FileData*, unsigned long long length)
 {
     return to_string(length);
 }
 
-inline string hashSecondHash(FileData* data, unsigned long long length)
+inline string hashSecondHash(FileData* data, unsigned long long)
 {
     return computeHash(data->name.c_str(), data->data);
 }
@@ -264,7 +252,7 @@ Options getParams(int argc, char** args)
         int charPos = 0;
         while (args[i][charPos] != '\0')
         {
-            args[i][charPos] = tolower(args[i][charPos]);
+            args[i][charPos] = char(tolower(args[i][charPos]));
             ++charPos;
         }
 
@@ -455,7 +443,7 @@ int main(int argc, char* args[])
                     bytes += filesize.QuadPart;
                     ++files;
 
-                    if (filesize.QuadPart >= options.fileSizeMin && filesize.QuadPart <= options.fileSizeMax)
+                    if (ulong(filesize.QuadPart) >= options.fileSizeMin && ulong(filesize.QuadPart) <= options.fileSizeMax)
                     {
                         FileData* data = new FileData(fullName, ffd.cFileName, "", ffd, filesize.QuadPart);
                         unsigned long long firstHashKey;
