@@ -16,3 +16,4 @@
 
 #### Notes
 All comparisons are performed without regarding case since the Win32 API takes no regard to casing when searching for files.
+A GUI for running this app and viewing its output is under development.
