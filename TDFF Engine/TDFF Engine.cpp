@@ -1,5 +1,4 @@
 #include <iostream>
-#include <windows.h>
 #include <queue>
 #include <tchar.h>
 #include <stdio.h>
@@ -22,6 +21,7 @@
 #include <pathcch.h>
 #include <stringapiset.h>
 #include <climits>
+#include <filesystem>
 using namespace std;
 
 typedef unsigned long long ulong;
@@ -344,7 +344,7 @@ Options getParams(int argc, char** args)
 */
 int main(int argc, char* args[])
 {
-    Options options;
+    /*Options options;
     try
     {
         options = getParams(argc, args);
@@ -358,121 +358,28 @@ int main(int argc, char* args[])
         std::cout << e.what() << endl;
     }
     
-    time_t startTimeStamp = time(nullptr);
-
-    WIN32_FIND_DATAA ffd;
-    LARGE_INTEGER filesize;
-    string rawDir, searchDir, fullName, extension;
-    HANDLE hFind = INVALID_HANDLE_VALUE;
-    const DWORD ALLOWED_FILE_FLAGS = FILE_ATTRIBUTE_NORMAL | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED | FILE_ATTRIBUTE_COMPRESSED | FILE_ATTRIBUTE_ARCHIVE;
-
-    unordered_map<unsigned long long, vector<FileData*>> firstHash;
-    unordered_map<string, vector<FileData*>> secondHash;
-    queue<string> folders;
-
-    folders.push(options.root);
-
-    unsigned long long files = 0;
-    unsigned long long bytes = 0;
-    unsigned long long folderCount = 1;
-    auto firstHashFunction = lengthAndHashFirstHash;
-    auto secondHashFunction = hashSecondHash;
-    unordered_set<string>* extensionSet = nullptr;
-    bool negateExtensionSetCheck = false;
-    bool emptyExtensionSets = false;
-
-    switch (options.mode)
+    time_t startTimeStamp = time(nullptr);*/
+    auto folders = queue<filesystem::directory_entry>();
+    folders.push(filesystem::directory_entry{ "C:/Users/Tyson/Desktop" });
+    try 
     {
-        case Mode::CompareFileNamesOnly:
-            firstHashFunction = nameFirstHash;
-            secondHashFunction = nameSecondHash;
-            break;
-        case Mode::CompareFileSizesOnly:
-            secondHashFunction = lengthSecondHash;
-            break;
-    }
-
-    if (options.excludeExtensions.size() > 0)
-    {
-        extensionSet = &options.excludeExtensions;
-        negateExtensionSetCheck = true;
-    }
-    else if (options.includeExtensions.size() > 0)
-    {
-        extensionSet = &options.includeExtensions;
-        negateExtensionSetCheck = false;
-    }
-    else
-        emptyExtensionSets = true;
-
-    while (!folders.empty())
-    {
-        rawDir = folders.front();
-        folders.pop();
-
-        std::cout << rawDir << endl;
-
-        if (rawDir.length() > (MAX_PATH - 3))
+        while (!folders.empty()) 
         {
-            std::cout << "Directory path " << rawDir << " is too long.\n" << endl;
-            continue;
-        }
-
-        searchDir = rawDir + "*";
-
-        hFind = FindFirstFileA(searchDir.c_str(), &ffd);
-        if (hFind != INVALID_HANDLE_VALUE)
-        {
-            do
+            for (auto const& dir_entry : filesystem::directory_iterator{ folders.front() })
             {
-                stringToLower(ffd.cFileName);
-                fullName = rawDir + ffd.cFileName;
-
-                if (ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY && ffd.cFileName[0] != '.' && ffd.cFileName[1] != '\0' && ffd.cFileName[0] != '.' && ffd.cFileName[1] != '.' && ffd.cFileName[2] != '\0')
-                {
-                    if (!setContainsLower(options.excludeSubfolders, ffd.cFileName))
-                    {
-                        folders.push(fullName + "\\");
-                        ++folderCount;
-                    }
-                }
-                else if ((ffd.dwFileAttributes & ALLOWED_FILE_FLAGS) && checkExtension(*extensionSet, ffd.cFileName, negateExtensionSetCheck, emptyExtensionSets) && !setContainsLower(options.excludeFilenames, ffd.cFileName))
-                {
-                    filesize.LowPart = ffd.nFileSizeLow;
-                    filesize.HighPart = ffd.nFileSizeHigh;
-                    bytes += filesize.QuadPart;
-                    ++files;
-
-                    if (ulong(filesize.QuadPart) >= options.fileSizeMin && ulong(filesize.QuadPart) <= options.fileSizeMax)
-                    {
-                        FileData* data = new FileData(fullName, ffd.cFileName, "", ffd, filesize.QuadPart);
-                        unsigned long long firstHashKey;
-
-                        firstHashKey = firstHashFunction(ffd.cFileName, filesize.QuadPart);
-
-                        firstHash[firstHashKey].push_back(data);
-
-                        if (firstHash[firstHashKey].size() >= 2)
-                        {
-                            for (size_t i = 0; i < firstHash[firstHashKey].size(); ++i)
-                            {
-                                FileData* temp = firstHash[firstHashKey][i];
-                                if (temp->hash == "")
-                                {
-                                    temp->hash = secondHashFunction(temp, filesize.QuadPart);
-
-                                    secondHash[temp->hash].push_back(temp);
-                                }
-                            }
-                        }
-                    }
-                }
-            } while (FindNextFileA(hFind, &ffd) != 0);
-
-            FindClose(hFind);
+                cout << dir_entry << '\n';
+                if (dir_entry.is_directory()) folders.push(dir_entry);
+                //else if (dir_entry.is_regular_file()) std::cout << dir_entry << '\n';
+            }
+            folders.pop();
         }
     }
-    time_t endTimeStamp = time(nullptr);
+    catch (exception e)
+    {
+        cout << e.what();
+    }
+
+    /*time_t endTimeStamp = time(nullptr);
 
     ofstream file(options.output);
     file << "-----TDFF RESULT FILE-----" << endl;
@@ -585,5 +492,5 @@ int main(int argc, char* args[])
 
     file.close();
 
-    std::cout << endl << "Done!" << endl;
+    std::cout << endl << "Done!" << endl;*/
 }
