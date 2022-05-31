@@ -22,6 +22,8 @@
 #include <stringapiset.h>
 #include <climits>
 #include <filesystem>
+#include <io.h>
+#include <fcntl.h>
 using namespace std;
 
 typedef unsigned long long ulong;
@@ -359,17 +361,17 @@ int main(int argc, char* args[])
     }
     
     time_t startTimeStamp = time(nullptr);*/
+    _setmode(_fileno(stdout), _O_U16TEXT);
     auto folders = queue<filesystem::directory_entry>();
-    folders.push(filesystem::directory_entry{ "C:/Users/Tyson/Desktop" });
+    folders.push(filesystem::directory_entry{ "C:/Users/Tyson/Desktop/Blender/Spanish Project/Models" });
     try 
     {
         while (!folders.empty()) 
         {
             for (auto const& dir_entry : filesystem::directory_iterator{ folders.front() })
             {
-                cout << dir_entry << '\n';
                 if (dir_entry.is_directory()) folders.push(dir_entry);
-                //else if (dir_entry.is_regular_file()) std::cout << dir_entry << '\n';
+                else if (dir_entry.is_regular_file()) std::wcout << dir_entry << '\n';
             }
             folders.pop();
         }
