@@ -10,9 +10,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
-#include <openssl/sha.h>
-#include <sstream>
-#include <iomanip>
+
 #include <ctime>
 #include <fstream>
 #include <stdexcept>
@@ -24,9 +22,11 @@
 #include <filesystem>
 #include <io.h>
 #include <fcntl.h>
+
+#include "types.h";
+#include "HashHelpers.h"
 using namespace std;
 
-typedef unsigned long long ulong;
 const unordered_set<char> disallowedFilenameChars{ '<', '>', ':', '"', '/', '\\', '|', '?', '*', '\0' };
 
 enum class Mode
@@ -61,63 +61,7 @@ bool folderOrFileNameIsValid(string name)
     return true;
 }
 
-class FileData
-{
-public:
-    string name;
-    string hash;
-    string fileName;
-    unsigned long long size;
-    WIN32_FIND_DATAA data;
 
-    FileData(string name, string fileName, string hash, WIN32_FIND_DATAA data, unsigned long long size) : name(name), hash(hash), size(size), data(data), fileName(fileName) {}
-    FileData(FileData& o) : name(o.name), hash(o.hash), size(o.size), data(o.data), fileName(o.fileName) { }
-    FileData(FileData&& o) noexcept : name(o.name), hash(o.hash), size(o.size), data(o.data), fileName(o.fileName) { }
-};
-
-string computeHash(const char* file, WIN32_FIND_DATAA info)
-{
-    const size_t BUFFER_SIZE = 32768;
-
-    HANDLE openReadHandle = CreateFileA(file, GENERIC_READ, 1, NULL, OPEN_EXISTING, info.dwFileAttributes, NULL);
-    unsigned char hash[SHA256_DIGEST_LENGTH];
-    SHA256_CTX sha256;
-    SHA256_Init(&sha256);
-    void* buffer = malloc(BUFFER_SIZE);
-    DWORD bytesRead;
-    while (true)
-    {
-        if (!ReadFile(openReadHandle, buffer, BUFFER_SIZE, &bytesRead, NULL))
-        {
-            std::cout << file << "\t FILE READ ERROR: " << GetLastError() << endl;
-            free(buffer);
-            return "ERROR";
-        }
-        else
-        {
-            if (bytesRead)
-            {
-                SHA256_Update(&sha256, buffer, bytesRead);
-            }
-            else
-            {
-                SHA256_Final(hash, &sha256);
-                break;
-            }
-        }
-    }
-
-    free(buffer);
-
-    stringstream result;
-
-    for (size_t i = 0; i < SHA256_DIGEST_LENGTH; ++i)
-        result << hex << setw(2) << setfill('0') << int(hash[i]);
-
-    CloseHandle(openReadHandle);
-
-    return result.str();
-}
 
 inline void unsafeAddToSet(unordered_set<string>& container, string item, bool isDirectory)
 {
@@ -227,21 +171,21 @@ inline unsigned long long lengthAndHashFirstHash(char*, unsigned long long lengt
     return length;
 }
 
-inline string nameSecondHash(FileData* data, unsigned long long)
-{
-    string name(data->fileName);
-    return name;
-}
+//inline string nameSecondHash(FileData* data, unsigned long long)
+//{
+//    string name(data->fileName);
+//    return name;
+//}
 
-inline string lengthSecondHash(FileData*, unsigned long long length)
-{
-    return to_string(length);
-}
+//inline string lengthSecondHash(FileData*, unsigned long long length)
+//{
+//    return to_string(length);
+//}
 
-inline string hashSecondHash(FileData* data, unsigned long long)
-{
-    return computeHash(data->name.c_str(), data->data);
-}
+//inline string hashSecondHash(FileData* data, unsigned long long)
+//{
+//    return computeHash(data->name.c_str(), data->data);
+//}
 
 
 
@@ -346,6 +290,7 @@ Options getParams(int argc, char** args)
 */
 int main(int argc, char* args[])
 {
+    HashHelpers hashHelpers;
     /*Options options;
     try
     {
@@ -361,6 +306,9 @@ int main(int argc, char* args[])
     }
     
     time_t startTimeStamp = time(nullptr);*/
+    const string NO_HASH = "nohash";
+
+    unordered_map<ulong, unordered_map<string, vector<string>>> results;
     _setmode(_fileno(stdout), _O_U16TEXT);
     auto folders = queue<filesystem::directory_entry>();
     folders.push(filesystem::directory_entry{ "C:/Users/Tyson/Desktop/Blender/Spanish Project/Models" });
@@ -370,8 +318,23 @@ int main(int argc, char* args[])
         {
             for (auto const& dir_entry : filesystem::directory_iterator{ folders.front() })
             {
-                if (dir_entry.is_directory()) folders.push(dir_entry);
-                else if (dir_entry.is_regular_file()) std::wcout << dir_entry << '\n';
+                if (dir_entry.is_directory()) 
+                {
+                    folders.push(dir_entry);
+                }
+                else if (dir_entry.is_regular_file()) 
+                {
+                    if (results[dir_entry.file_size()].contains(NO_HASH) && results[dir_entry.file_size()][NO_HASH].size() >= 1)
+                    {
+                        results[dir_entry.file_size()][NO_HASH].push_back(dir_entry.path().string());
+                        for (auto& file : results[dir_entry.file_size()][NO_HASH]) 
+                        {
+                            results[dir_entry.file_size()][hashHelpers.computeHash(file)].push_back(file);
+                        }
+
+                        results[dir_entry.file_size()].erase(NO_HASH);
+                    }
+                }
             }
             folders.pop();
         }
