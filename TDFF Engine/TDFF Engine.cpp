@@ -25,83 +25,38 @@
 
 #include "types.h";
 #include "HashHelpers.h"
+#include "helpers.h";
 using namespace std;
 
-const unordered_set<char> disallowedFilenameChars{ '<', '>', ':', '"', '/', '\\', '|', '?', '*', '\0' };
-
-enum class Mode
-{
-    CompareFileNamesOnly,
-    CompareFileSizesOnly,
-    CompareHashes
-};
-
-class Options
-{
-public:
-    string root;
-    string output;
-    unordered_set<string> excludeSubfolders;
-    unordered_set<string> excludeFilenames;
-    unordered_set<string> includeExtensions;
-    unordered_set<string> excludeExtensions;
-    unsigned long long fileSizeMax = ULLONG_MAX;
-    unsigned long long fileSizeMin = 1;
-    Mode mode = Mode::CompareHashes;
-};
-
-bool folderOrFileNameIsValid(string name)
-{
-    for (const char& c : name)
-    {
-        if (disallowedFilenameChars.find(c) != disallowedFilenameChars.end())
-            return false;
-    }
-
-    return true;
-}
 
 
 
-inline void unsafeAddToSet(unordered_set<string>& container, string item, bool isDirectory)
-{
-    if (isDirectory)
-    {
-        if (!folderOrFileNameIsValid(item))
-            throw runtime_error(item + " is not a valid file or directory name.");
-    }
-    else
-    {
-        if (item[0] != '.' || item.length() == 1 || !folderOrFileNameIsValid(item))
-            throw runtime_error(item + " is not a valid extension.");
-    }
 
-    container.insert(item);
-}
 
-void splitDelimitedParamItem(unordered_set<string>& container, const char* paramString, bool isDirectory)
-{
-    size_t strPos = 0;
-    string item;
-    while (true)
-    {
-        if (paramString[strPos] == ';')
-        {
-            unsafeAddToSet(container, item, isDirectory);
-            item.clear();
-        }
-        else if (paramString[strPos] == '\0')
-        {
-            if (!item.empty())
-                unsafeAddToSet(container, item, isDirectory);
-            break;
-        }
-        else
-            item += paramString[strPos];
 
-        ++strPos;
-    }
-}
+//void splitDelimitedParamItem(unordered_set<string>& container, const char* paramString, bool isDirectory)
+//{
+//    size_t strPos = 0;
+//    string item;
+//    while (true)
+//    {
+//        if (paramString[strPos] == ';')
+//        {
+//            unsafeAddToSet(container, item, isDirectory);
+//            item.clear();
+//        }
+//        else if (paramString[strPos] == '\0')
+//        {
+//            if (!item.empty())
+//                unsafeAddToSet(container, item, isDirectory);
+//            break;
+//        }
+//        else
+//            item += paramString[strPos];
+//
+//        ++strPos;
+//    }
+//}
 
 bool isValidNumber(const char* number)
 {
@@ -187,95 +142,6 @@ inline unsigned long long lengthAndHashFirstHash(char*, unsigned long long lengt
 //    return computeHash(data->name.c_str(), data->data);
 //}
 
-
-
-Options getParams(int argc, char** args)
-{
-    Options* options = new Options();
-
-    for (size_t i = 1; i < argc; ++i)
-    {
-        int charPos = 0;
-        while (args[i][charPos] != '\0')
-        {
-            args[i][charPos] = char(tolower(args[i][charPos]));
-            ++charPos;
-        }
-
-    }
-
-    for (size_t i = 1; i < argc; i++)
-    {
-        if (strcmp(args[i], "-i") == 0)
-        {
-            if (!PathFileExistsA(args[++i]))
-                throw runtime_error("Root folder doesn't exist.");
-
-            options->root = args[i];
-        }
-        else if (strcmp(args[i], "-o") == 0)
-        {
-            char* outputParent = new char[MAX_PATH];
-            strcpy(outputParent, args[++i]);
-            PathRemoveFileSpecA(outputParent);
-            if (!PathFileExistsA(outputParent))
-                throw runtime_error("Output path doesn't exist.");
-
-            char* rawFileName = new char[MAX_PATH];
-            strcpy(rawFileName, args[i]);
-            PathStripPathA(rawFileName);
-
-            string rawFileNameString(rawFileName);
-            if (!folderOrFileNameIsValid(rawFileNameString))
-                throw runtime_error("Output filename " + rawFileNameString + " contains invalid characters.");
-
-            options->output = args[i];
-
-            delete[] outputParent;
-            delete[] rawFileName;
-        }
-        else if (strcmp(args[i], "-exd") == 0)
-            splitDelimitedParamItem(options->excludeSubfolders, args[++i], true);
-        else if (strcmp(args[i], "-exf") == 0)
-            splitDelimitedParamItem(options->excludeFilenames, args[++i], true);
-        else if (strcmp(args[i], "-ine") == 0)
-            splitDelimitedParamItem(options->includeExtensions, args[++i], false);
-        else if (strcmp(args[i], "-exe") == 0)
-            splitDelimitedParamItem(options->excludeExtensions, args[++i], false);
-        else if (strcmp(args[i], "-smax") == 0)
-            options->fileSizeMax = cstringToUll(args[++i]);
-        else if (strcmp(args[i], "-smin") == 0)
-            options->fileSizeMin = cstringToUll(args[++i]);
-        else if (strcmp(args[i], "-mode") == 0)
-        {
-            if (strcmp(args[++i], "name") == 0)
-                options->mode = Mode::CompareFileNamesOnly;
-            else if (strcmp(args[i], "size") == 0)
-                options->mode = Mode::CompareFileSizesOnly;
-            else
-                options->mode = Mode::CompareHashes;
-        }
-        else
-        {
-            throw runtime_error("Unrecognized parameter: " + string(args[i]));
-        }
-    }
-
-    if (options->root.empty())
-        throw runtime_error("Root folder must be specified.");
-    if (options->output.empty())
-        throw runtime_error("Output file must be specified.");
-    if (options->includeExtensions.size() != 0 && options->excludeExtensions.size() != 0)
-        throw runtime_error("Parameters -ine and -exe cannot be used together.");
-
-    if (options->root[options->root.length() - 1] != '\\')
-        options->root += '\\';
-
-    Options returnValue(*options);
-    delete options;
-    return returnValue;
-}
-
 /*
 * Params: 
 * -i: Root folder*
@@ -308,15 +174,18 @@ int main(int argc, char* args[])
     time_t startTimeStamp = time(nullptr);*/
     const string NO_HASH = "nohash";
 
-    unordered_map<ulong, unordered_map<string, vector<string>>> results;
+    unordered_map<ulong, unordered_map<string, vector<wstring>>> results;
     _setmode(_fileno(stdout), _O_U16TEXT);
     auto folders = queue<filesystem::directory_entry>();
-    folders.push(filesystem::directory_entry{ "C:/Users/Tyson/Desktop/Blender/Spanish Project/Models" });
+    folders.push(filesystem::directory_entry{ "C:/Users/Tyson/Pictures" });
     try 
     {
         while (!folders.empty()) 
         {
-            for (auto const& dir_entry : filesystem::directory_iterator{ folders.front() })
+            filesystem::directory_entry currentDirectory = folders.front();
+            folders.pop();
+            wcout << currentDirectory << '\n';
+            for (auto const& dir_entry : filesystem::directory_iterator{ currentDirectory })
             {
                 if (dir_entry.is_directory()) 
                 {
@@ -324,24 +193,45 @@ int main(int argc, char* args[])
                 }
                 else if (dir_entry.is_regular_file()) 
                 {
-                    if (results[dir_entry.file_size()].contains(NO_HASH) && results[dir_entry.file_size()][NO_HASH].size() >= 1)
+                    ulong fileSize = dir_entry.file_size();
+                    wstring fileName = dir_entry.path().wstring();
+                    if (results.contains(fileSize))
                     {
-                        results[dir_entry.file_size()][NO_HASH].push_back(dir_entry.path().string());
-                        for (auto& file : results[dir_entry.file_size()][NO_HASH]) 
+                        unordered_map<string, vector<wstring>>& sizeMap = results[fileSize];
+                        if (sizeMap.contains(NO_HASH) && sizeMap[NO_HASH].size() >= 1)
                         {
-                            results[dir_entry.file_size()][hashHelpers.computeHash(file)].push_back(file);
+                            for (wstring& file : sizeMap[NO_HASH])
+                            {
+                                sizeMap[hashHelpers.computeHash(file)].push_back(file);
+                            }
+
+                            sizeMap.erase(NO_HASH);
                         }
 
-                        results[dir_entry.file_size()].erase(NO_HASH);
+                        sizeMap[hashHelpers.computeHash(fileName)].push_back(fileName);
+                    }
+                    else
+                    {
+                        results[fileSize][NO_HASH].push_back(fileName);
                     }
                 }
             }
-            folders.pop();
         }
     }
     catch (exception e)
     {
         cout << e.what();
+    }
+
+    for (const auto& sizeMap : results) 
+    {
+        for (const auto& hashMap : sizeMap.second) 
+        {
+            for (const auto& file : hashMap.second)
+            {
+                wcout << "DUPLICATE: " << file << '\n';
+            }
+        }
     }
 
     /*time_t endTimeStamp = time(nullptr);

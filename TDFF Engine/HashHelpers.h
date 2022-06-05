@@ -23,7 +23,7 @@ public:
     {
         free(buffer);
     }
-    string computeHash(string& file)
+    string computeHash(wstring& file)
     {
         unsigned char hash[SHA256_DIGEST_LENGTH];
         SHA256_CTX sha256;
