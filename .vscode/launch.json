@@ -5,15 +5,17 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "type": "lldb",
+            "type": "cppvsdbg",
             "request": "launch",
             "name": "Debug",
             "program": "${workspaceFolder}/target/debug/tdff_engine.exe",
             "args": [
-                "-i",
+                "-p",
                 "C:\\Users\\Tyson\\Desktop\\Blender",
                 "-o",
-                "C:\\Users\\Tyson\\Downloads\\asdf.txt"
+                "C:\\Users\\Tyson\\Source\\Repos\\TDFF-Engine\\asdf.json",
+                "-e",
+                "Addons,AwesomeBump,Colored Plume"
             ],
             "cwd": "${workspaceFolder}",
             "preLaunchTask": "rust: cargo dev build"
