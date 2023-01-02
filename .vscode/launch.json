@@ -15,7 +15,7 @@
                 "-o",
                 "C:\\Users\\Tyson\\Source\\Repos\\TDFF-Engine\\asdf.json",
                 "-e",
-                "Addons,AwesomeBump,Colored Plume"
+                "\"Talent Show\",\"photogrammetry\""
             ],
             "cwd": "${workspaceFolder}",
             "preLaunchTask": "rust: cargo dev build"

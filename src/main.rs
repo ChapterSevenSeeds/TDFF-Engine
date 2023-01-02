@@ -1,11 +1,12 @@
 use clap::Parser;
+use indicatif::{ProgressBar, ProgressIterator, ProgressStyle};
 use itertools::Itertools;
-use json_writer::{JSONObjectWriter};
+use json_writer::JSONObjectWriter;
 use regex::Regex;
+use std::collections::{vec_deque, VecDeque};
 use std::fs::File;
 use std::{collections::HashMap, fs};
 use walkdir::WalkDir;
-use indicatif::{ProgressBar, ProgressIterator, ProgressStyle};
 
 use crate::sha_256_adapter::Sha256Adapter;
 mod sha_256_adapter;
@@ -14,17 +15,17 @@ mod sha_256_adapter;
 struct Cli {
     /// The input folder.
     #[clap(short, long)]
-    path: String,
+    path: std::path::PathBuf,
     /// The output file.
     #[clap(short, long)]
     output: std::path::PathBuf,
     /// List of regular expression patterns to exclude in search.
     #[clap(short, long, value_delimiter = ',')]
-    exclude: Option<Vec<String>>,
+    exclude: Option<String>,
     /// List of regular expression patterns to include in search.
     /// All other paths will be excluded.
     #[clap(short, long, value_delimiter = ',')]
-    include: Option<Vec<String>>,
+    include: Option<String>,
     /// The minimum filesize to include in the search.
     #[clap(long)]
     minsize: Option<u64>,
@@ -33,33 +34,65 @@ struct Cli {
     maxsize: Option<u64>,
 }
 
+fn parse_array(arg: &str, delimiter: char, escape: char) -> Vec<String> {
+    let mut temp: String = String::new();
+    let mut result: Vec<String> = Vec::new();
+
+    let mut inEscape: bool = false;
+    let mut lastEscapeChar: char = '\0';
+    let mut escapeSlashCount: u32 = 0;
+    for c in arg.chars() {
+        if c == escape && (!inEscape || c == lastEscapeChar) {
+            if inEscape {
+                if escapeSlashCount % 2 == 0 {
+                    inEscape = false;
+                }
+            } else {
+                lastEscapeChar = c;
+                inEscape = true;
+            }
+        }
+
+        if c == delimiter {
+            if !inEscape {
+                if !temp.is_empty() {
+                    result.push(temp.clone());
+                    temp.clear();
+                }
+            } else {
+                temp += c.to_string().as_str();
+            }
+        } else {
+            temp += c.to_string().as_str();
+        }
+
+        if inEscape && c == '\\' {
+            escapeSlashCount += 1;
+        } else {
+            escapeSlashCount = 0;
+        }
+    }
+
+    if !temp.is_empty() {
+        result.push(temp);
+    }
+
+    return result;
+}
+
 fn main() {
     let args = Cli::parse();
 
-    let exclude_regex = match &args.exclude {
-        Some(items) => Some(
-            Regex::new(
-                std::format!(
-                    "((?i){})",
-                    items
-                        .iter()
-                        .map(|item| std::format!("({})", item))
-                        .intersperse(String::from("|"))
-                        .collect::<String>(),
-                )
-                .as_str(),
-            )
-            .unwrap(),
-        ),
-        None => None,
-    };
+    let exclude_items = parse_array(args.exclude.unwrap_or_default().as_str(), ',', '"');
+    let include_items = parse_array(args.include.unwrap_or_default().as_str(), ',', '"');
 
-    let include_regex = match &args.include {
-        Some(items) => Some(
+    let mut exclude_regex: Option<Regex> = None;
+    if exclude_items.len() > 0 {
+        exclude_regex = Some(
             Regex::new(
                 std::format!(
                     "((?i){})",
-                    items
+                    exclude_items
                         .iter()
                         .map(|item| std::format!("({})", item))
                         .intersperse(String::from("|"))
@@ -68,9 +101,26 @@ fn main() {
                 .as_str(),
             )
             .unwrap(),
-        ),
-        None => None,
-    };
+        );
+    }
+
+    let mut include_regex: Option<Regex> = None;
+    if include_items.len() > 0 {
+        include_regex = Some(
+            Regex::new(
+                std::format!(
+                    "((?i){})",
+                    include_items
+                        .iter()
+                        .map(|item| std::format!("({})", item))
+                        .intersperse(String::from("|"))
+                        .collect::<String>(),
+                )
+                .as_str(),
+            )
+            .unwrap(),
+        );
+    }
 
     let min_size = match args.minsize {
         Some(size) => size,
@@ -82,51 +132,64 @@ fn main() {
         None => u64::MAX,
     };
 
-    let mut files_by_size: HashMap<u64, Vec<walkdir::DirEntry>> = HashMap::new();
+    let mut files_by_size: HashMap<u64, Vec<fs::DirEntry>> = HashMap::new();
     let bar = ProgressBar::new(u64::MAX);
     bar.set_style(ProgressStyle::with_template("{spinner} {msg}").unwrap());
-    for e in WalkDir::new(&args.path)
-        .into_iter()
-        .filter_map(|e| match e {
-            Ok(entry) => {
-                let path_str = entry.path().to_str().unwrap();
-                let size = entry.metadata().unwrap().len();
-                if exclude_regex.is_some() && exclude_regex.as_ref().unwrap().is_match(path_str) {
-                    return None;
-                } else if include_regex.is_some()
-                    && !include_regex.as_ref().unwrap().is_match(path_str)
-                {
-                    return None;
-                } else if size < min_size {
-                    return None;
-                } else if size > max_size {
+
+    let mut directories = VecDeque::from([args.path.clone()]);
+
+    while !directories.is_empty() {
+        for entry in fs::read_dir(directories.pop_back().unwrap())
+            .unwrap()
+            .filter_map(|e| match e {
+                Ok(entry) => {
+                    let path_str = String::from(entry.path().to_str().unwrap());
+                    let size = entry.metadata().unwrap().len();
+                    if exclude_regex.is_some()
+                        && exclude_regex.as_ref().unwrap().is_match(&path_str)
+                    {
+                        return None;
+                    } else if include_regex.is_some()
+                        && !include_regex.as_ref().unwrap().is_match(&path_str)
+                    {
+                        return None;
+                    } else if size < min_size {
+                        return None;
+                    } else if size > max_size {
+                        return None;
+                    }
+
+                    return Some(entry);
+                }
+                Err(_err) => {
                     return None;
                 }
-
-                return Some(entry);
+            })
+        {
+            if entry.metadata().unwrap().is_dir() {
+                bar.set_message(String::from(
+                    entry.path().file_stem().unwrap().to_str().unwrap(),
+                ));
+                directories.push_front(entry.path());
+            } else {
+                let metadata = entry.metadata().unwrap();
+                if metadata.is_file() {
+                    files_by_size
+                        .entry(metadata.len())
+                        .or_insert(Vec::new())
+                        .push(entry);
+                }
             }
-            Err(_err) => {
-                return None;
-            }
-        })
-    {
-        bar.set_message(String::from(e.path().file_stem().unwrap().to_str().unwrap()));
-        let metadata = e.metadata().unwrap();
-        if metadata.is_file() {
-            files_by_size
-                .entry(metadata.len())
-                .or_insert(Vec::new())
-                .push(e);
         }
     }
-    
+
     bar.finish();
 
-    let mut files_by_hash: HashMap<[u8; 32], Vec<&walkdir::DirEntry>> = HashMap::new();
-    let size_dups: Vec<&walkdir::DirEntry> = files_by_size
+    let mut files_by_hash: HashMap<[u8; 32], Vec<&fs::DirEntry>> = HashMap::new();
+    let size_dups: Vec<&fs::DirEntry> = files_by_size
         .iter()
         .filter(|entry| entry.1.len() >= 2)
-        .flat_map(|entry| entry.1)
+        .flat_map(|entry| entry.1.to_owned())
         .collect();
 
     let bar = ProgressBar::new(size_dups.len().try_into().unwrap());
@@ -148,16 +211,10 @@ fn main() {
 
     let mut object_str = String::from("");
     let mut object_writer = JSONObjectWriter::new(&mut object_str);
-    object_writer.value("path", &args.path);
+    object_writer.value("path", args.path.to_str());
     object_writer.value("output", args.output.as_path().to_str());
-    object_writer.value(
-        "excluded",
-        args.exclude.unwrap_or(vec![]).join(",").as_str(),
-    );
-    object_writer.value(
-        "included",
-        args.include.unwrap_or(vec![]).join(",").as_str(),
-    );
+    object_writer.value("excluded", exclude_items.join(",").as_str());
+    object_writer.value("included", include_items.join(",").as_str());
     object_writer.value("minsize", args.minsize.unwrap_or(0).to_string().as_str());
     object_writer.value(
         "maxsize",
