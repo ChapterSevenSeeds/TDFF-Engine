@@ -11,11 +11,13 @@
             "program": "${workspaceFolder}/target/debug/tdff_engine.exe",
             "args": [
                 "-p",
-                "C:\\Users\\Tyson\\Desktop\\Blender",
+                "C:\\Users\\Tyson\\Source\\Repos",
                 "-o",
                 "C:\\Users\\Tyson\\Source\\Repos\\TDFF-Engine\\asdf.json",
                 "-e",
-                "\"Talent Show\",\"photogrammetry\""
+                "node_modules,.git",
+                "--minsize",
+                "5"
             ],
             "cwd": "${workspaceFolder}",
             "preLaunchTask": "rust: cargo dev build"

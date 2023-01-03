@@ -1,12 +1,12 @@
 use clap::Parser;
-use indicatif::{ProgressBar, ProgressIterator, ProgressStyle};
+use indicatif::{ProgressBar, ProgressStyle};
 use itertools::Itertools;
 use json_writer::JSONObjectWriter;
+use parse_size::parse_size;
 use regex::Regex;
-use std::collections::{vec_deque, VecDeque};
+use std::collections::VecDeque;
 use std::fs::File;
 use std::{collections::HashMap, fs};
-use walkdir::WalkDir;
 
 use crate::sha_256_adapter::Sha256Adapter;
 mod sha_256_adapter;
@@ -20,57 +20,45 @@ struct Cli {
     #[clap(short, long)]
     output: std::path::PathBuf,
     /// List of regular expression patterns to exclude in search.
-    #[clap(short, long, value_delimiter = ',')]
+    #[clap(short, long)]
     exclude: Option<String>,
     /// List of regular expression patterns to include in search.
     /// All other paths will be excluded.
-    #[clap(short, long, value_delimiter = ',')]
+    #[clap(short, long)]
     include: Option<String>,
     /// The minimum filesize to include in the search.
-    #[clap(long)]
-    minsize: Option<u64>,
+    #[clap(long, default_value = "0 B")]
+    minsize: Option<String>,
     /// The maximum filesize to include in the search.
-    #[clap(long)]
-    maxsize: Option<u64>,
+    #[clap(long, default_value = "18.446744073709551615 EB")]
+    maxsize: Option<String>,
 }
 
-fn parse_array(arg: &str, delimiter: char, escape: char) -> Vec<String> {
+fn parse_array(arg: Option<String>, delimiter: char, escape: char) -> Vec<String> {
+    if arg.is_none() {
+        return Vec::new();
+    }
+
     let mut temp: String = String::new();
     let mut result: Vec<String> = Vec::new();
 
-    let mut inEscape: bool = false;
-    let mut lastEscapeChar: char = '\0';
-    let mut escapeSlashCount: u32 = 0;
-    for c in arg.chars() {
-        if c == escape && (!inEscape || c == lastEscapeChar) {
-            if inEscape {
-                if escapeSlashCount % 2 == 0 {
-                    inEscape = false;
-                }
-            } else {
-                lastEscapeChar = c;
-                inEscape = true;
-            }
+    let mut in_escape: bool = false;
+    for c in arg.unwrap().chars() {
+        if c == escape {
+            in_escape = !in_escape;
+            continue;
         }
 
-        if c == delimiter {
-            if !inEscape {
-                if !temp.is_empty() {
-                    result.push(temp.clone());
-                    temp.clear();
-                }
-            } else {
-                temp += c.to_string().as_str();
+        if c == delimiter && !in_escape {
+            if !temp.is_empty() {
+                result.push(temp.clone());
+                temp.clear();
             }
-        } else {
-            temp += c.to_string().as_str();
+
+            continue;
         }
 
-        if inEscape && c == '\\' {
-            escapeSlashCount += 1;
-        } else {
-            escapeSlashCount = 0;
-        }
+        temp.push(c);
     }
 
     if !temp.is_empty() {
@@ -83,8 +71,8 @@ fn parse_array(arg: &str, delimiter: char, escape: char) -> Vec<String> {
 fn main() {
     let args = Cli::parse();
 
-    let exclude_items = parse_array(args.exclude.unwrap_or_default().as_str(), ',', '"');
-    let include_items = parse_array(args.include.unwrap_or_default().as_str(), ',', '"');
+    let exclude_items = parse_array(args.exclude, ',', '"');
+    let include_items = parse_array(args.include, ',', '"');
 
     let mut exclude_regex: Option<Regex> = None;
     if exclude_items.len() > 0 {
@@ -122,13 +110,23 @@ fn main() {
         );
     }
 
-    let min_size = match args.minsize {
-        Some(size) => size,
+    let min_size = match &args.minsize {
+        Some(size) => match parse_size(size) {
+            Ok(size) => size,
+            Err(e) => {
+                panic!("{}", e);
+            }
+        },
         None => 0,
     };
 
-    let max_size = match args.maxsize {
-        Some(size) => size,
+    let max_size = match &args.maxsize {
+        Some(size) => match parse_size(size) {
+            Ok(size) => size,
+            Err(e) => {
+                panic!("{}", e);
+            }
+        },
         None => u64::MAX,
     };
 
@@ -145,6 +143,7 @@ fn main() {
                 Ok(entry) => {
                     let path_str = String::from(entry.path().to_str().unwrap());
                     let size = entry.metadata().unwrap().len();
+                    let is_dir = entry.metadata().unwrap().is_dir();
                     if exclude_regex.is_some()
                         && exclude_regex.as_ref().unwrap().is_match(&path_str)
                     {
@@ -153,9 +152,9 @@ fn main() {
                         && !include_regex.as_ref().unwrap().is_match(&path_str)
                     {
                         return None;
-                    } else if size < min_size {
+                    } else if !is_dir && size < min_size {
                         return None;
-                    } else if size > max_size {
+                    } else if !is_dir && size > max_size {
                         return None;
                     }
 
@@ -215,11 +214,8 @@ fn main() {
     object_writer.value("output", args.output.as_path().to_str());
     object_writer.value("excluded", exclude_items.join(",").as_str());
     object_writer.value("included", include_items.join(",").as_str());
-    object_writer.value("minsize", args.minsize.unwrap_or(0).to_string().as_str());
-    object_writer.value(
-        "maxsize",
-        args.minsize.unwrap_or(u64::MAX).to_string().as_str(),
-    );
+    object_writer.value("minsize", args.minsize.unwrap().as_str());
+    object_writer.value("maxsize", args.maxsize.unwrap().as_str());
     let mut duplicates = object_writer.array("duplicates");
 
     for (_, files) in files_by_hash.iter().filter(|(_, files)| files.len() >= 2) {
@@ -234,5 +230,7 @@ fn main() {
 
     if fs::write(args.output, object_str).is_err() {
         print!("Unable to create output file");
+    } else {
+        print!("Done!");
     }
 }
