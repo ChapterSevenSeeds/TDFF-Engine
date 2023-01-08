@@ -12,6 +12,7 @@ itertools = "0.10.5"
 json-writer = "0.2.1"
 openssl = "0.10.45"
 parse-size = "1.0.0"
+rayon = "1.6.1"
 regex = "1.7.0"
 [profile.release]
 debug = true

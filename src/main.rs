@@ -1,12 +1,12 @@
 use clap::Parser;
-use indicatif::{ProgressBar, ProgressStyle};
+use indicatif::{HumanBytes, HumanCount, ProgressBar, ProgressStyle};
 use itertools::Itertools;
 use json_writer::JSONObjectWriter;
 use parse_size::parse_size;
+use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
 use regex::Regex;
-use std::collections::VecDeque;
-use std::fs::File;
-use std::{collections::HashMap, fs};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::fs;
 
 use crate::sha_256_adapter::Sha256Adapter;
 mod sha_256_adapter;
@@ -132,10 +132,13 @@ fn main() {
 
     let mut files_by_size: HashMap<u64, Vec<fs::DirEntry>> = HashMap::new();
     let bar = ProgressBar::new(u64::MAX);
-    bar.set_style(ProgressStyle::with_template("{spinner} {msg}").unwrap());
+    bar.set_style(ProgressStyle::with_template("[{elapsed_precise}] {msg}").unwrap());
 
     let mut directories = VecDeque::from([args.path.clone()]);
 
+    let mut total_files: u64 = 0;
+    let mut total_dirs: u64 = 0;
+    let mut total_bytes: u64 = 0;
     while !directories.is_empty() {
         for entry in fs::read_dir(directories.pop_back().unwrap())
             .unwrap()
@@ -166,12 +169,18 @@ fn main() {
             })
         {
             if entry.metadata().unwrap().is_dir() {
-                bar.set_message(String::from(
-                    entry.path().file_stem().unwrap().to_str().unwrap(),
+                total_dirs += 1;
+                bar.set_message(std::format!(
+                    "Folders: {} Files: {} Bytes: {}",
+                    HumanCount(total_dirs),
+                    HumanCount(total_files),
+                    HumanBytes(total_bytes)
                 ));
                 directories.push_front(entry.path());
             } else {
+                total_files += 1;
                 let metadata = entry.metadata().unwrap();
+                total_bytes += metadata.len();
                 if metadata.is_file() {
                     files_by_size
                         .entry(metadata.len())
@@ -184,7 +193,6 @@ fn main() {
 
     bar.finish();
 
-    let mut files_by_hash: HashMap<[u8; 32], Vec<&fs::DirEntry>> = HashMap::new();
     let size_dups: Vec<&fs::DirEntry> = files_by_size
         .iter()
         .filter(|entry| entry.1.len() >= 2)
@@ -192,21 +200,47 @@ fn main() {
         .collect();
 
     let bar = ProgressBar::new(size_dups.len().try_into().unwrap());
-    bar.set_style(ProgressStyle::with_template("{bar:40.cyan/blue} {percent}%").unwrap());
-    for file in size_dups.iter() {
-        bar.inc(1);
-        let mut hasher = Sha256Adapter::new();
+    bar.set_style(
+        ProgressStyle::with_template("[{elapsed_precise}] {bar:40.cyan/blue} {percent}%").unwrap(),
+    );
+    let files_by_hash: HashMap<[u8; 32], HashSet<(String, u64)>> = size_dups
+        .par_iter()
+        .fold(
+            || HashMap::new(),
+            |mut acc, cur| {
+                bar.inc(1);
+                let mut hasher = Sha256Adapter::new();
 
-        let mut f = File::open(file.path()).unwrap();
-        if std::io::copy(&mut f, &mut hasher).is_err() {
-            continue;
-        }
+                let f = fs::File::open(cur.path());
+                if f.is_err() {
+                    return acc;
+                }
 
-        files_by_hash
-            .entry(hasher.finish())
-            .or_insert(Vec::new())
-            .push(file.clone());
-    }
+                if std::io::copy(&mut f.unwrap(), &mut hasher).is_err() {
+                    return acc;
+                }
+
+                let hash = hasher.finish();
+                acc.entry(hash).or_insert(HashSet::new()).insert((
+                    String::from(cur.path().to_str().unwrap()),
+                    cur.metadata().unwrap().len(),
+                ));
+
+                return acc;
+            },
+        )
+        .reduce(
+            || HashMap::new(),
+            |mut acc, cur| {
+                for (hash, files) in cur.iter() {
+                    acc.entry(*hash)
+                        .or_insert(files.clone())
+                        .extend(files.iter().map(|x| x.clone()));
+                }
+
+                acc
+            },
+        );
 
     let mut object_str = String::from("");
     let mut object_writer = JSONObjectWriter::new(&mut object_str);
@@ -218,14 +252,26 @@ fn main() {
     object_writer.value("maxsize", args.maxsize.unwrap().as_str());
     let mut duplicates = object_writer.array("duplicates");
 
+    let mut duplicate_bytes: u64 = 0;
     for (_, files) in files_by_hash.iter().filter(|(_, files)| files.len() >= 2) {
         let mut group = duplicates.array();
-        for file in files {
-            group.value(file.path().to_str().unwrap());
+        let mut first = true;
+        for (file, bytes) in files {
+            group.value(file);
+
+            if !first {
+                duplicate_bytes += bytes;
+            } else {
+                first = false;
+            }
         }
     }
 
     duplicates.end();
+    object_writer.value(
+        "duplicate_bytes",
+        HumanBytes(duplicate_bytes).to_string().as_str(),
+    );
     object_writer.end();
 
     if fs::write(args.output, object_str).is_err() {
