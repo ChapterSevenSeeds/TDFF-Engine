@@ -7,6 +7,7 @@ use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
 use regex::Regex;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
+use std::path::PathBuf;
 
 use crate::sha_256_adapter::Sha256Adapter;
 mod sha_256_adapter;
@@ -130,7 +131,7 @@ fn main() {
         None => u64::MAX,
     };
 
-    let mut files_by_size: HashMap<u64, Vec<fs::DirEntry>> = HashMap::new();
+    let mut files_by_size: HashMap<u64, Vec<PathBuf>> = HashMap::new();
     let bar = ProgressBar::new(u64::MAX);
     bar.set_style(ProgressStyle::with_template("[{elapsed_precise}] {msg}").unwrap());
 
@@ -185,7 +186,7 @@ fn main() {
                     files_by_size
                         .entry(metadata.len())
                         .or_insert(Vec::new())
-                        .push(entry);
+                        .push(entry.path());
                 }
             }
         }
@@ -193,7 +194,7 @@ fn main() {
 
     bar.finish();
 
-    let size_dups: Vec<&fs::DirEntry> = files_by_size
+    let size_dups: Vec<PathBuf> = files_by_size
         .iter()
         .filter(|entry| entry.1.len() >= 2)
         .flat_map(|entry| entry.1.to_owned())
@@ -211,7 +212,7 @@ fn main() {
                 bar.inc(1);
                 let mut hasher = Sha256Adapter::new();
 
-                let f = fs::File::open(cur.path());
+                let f = fs::File::open(cur);
                 if f.is_err() {
                     return acc;
                 }
@@ -222,7 +223,7 @@ fn main() {
 
                 let hash = hasher.finish();
                 acc.entry(hash).or_insert(HashSet::new()).insert((
-                    String::from(cur.path().to_str().unwrap()),
+                    String::from(cur.to_str().unwrap()),
                     cur.metadata().unwrap().len(),
                 ));
 
